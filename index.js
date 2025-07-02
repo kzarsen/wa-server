@@ -61,20 +61,25 @@ app.get('/qr', (req, res) => {
 // Обработка POST-запросов для отправки сообщений
 app.post('/send', async (req, res) => {
   const body = req.body?.body || req.body;
-  const raw = body.destination || "";
-  const text = body.message || "Пустое сообщение";
+  const raw = body.destination || body.phone || "";
+  const text = body.message || body.text || "Сообщение по умолчанию";
 
-  // Форматирование номера
   let digits = raw.replace(/\D/g, '');
-  if (digits.startsWith('8')) digits = '7' + digits.slice(1);
-  if (digits.length === 10) digits = '7' + digits;
-  if (digits.length !== 11 || !digits.startsWith('7')) {
+
+  if (digits.length === 10) {
+    digits = '7' + digits;
+  } else if (digits.length === 11 && digits.startsWith('8')) {
+    digits = '7' + digits.slice(1);
+  }
+
+  // 🔐 Финальная проверка
+  const validPhone = digits.length === 11 && digits.startsWith('7');
+  if (!validPhone) {
     console.log('❌ Неверный номер:', raw);
-    return res.status(400).json({ error: 'Неверный номер телефона' });
+    return res.status(400).json({ error: 'Неверный номер телефона', original: raw });
   }
 
   if (!isReady) {
-    console.log('⛔ WhatsApp ещё не подключён');
     return res.status(503).json({ error: 'WhatsApp ещё не подключён' });
   }
 
@@ -82,7 +87,7 @@ app.post('/send', async (req, res) => {
 
   try {
     const result = await client.sendMessage(chatId, text);
-    console.log(`✅ Сообщение отправлено на ${digits}: ${text}`);
+    console.log(`✅ Отправлено ${digits}: ${text}`);
     res.json({ success: true });
   } catch (error) {
     console.error('❌ Ошибка отправки:', error.message);
