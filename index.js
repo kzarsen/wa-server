@@ -9,13 +9,13 @@ const port = process.env.PORT || 3000;
 let qrCode = null;
 let isReady = false;
 
-// Настройка шаблонов и статики
+// Настройки шаблонов и JSON
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.json()); // поддержка JSON-запросов
+app.use(express.json());
 
-// Инициализация WhatsApp-клиента
+// Инициализация WhatsApp клиента
 const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
@@ -27,52 +27,70 @@ const client = new Client({
 client.on('qr', (qr) => {
   qrcode.toDataURL(qr, (err, url) => {
     qrCode = url;
+    console.log('📱 QR-код готов, перейди на /qr');
   });
 });
 
 client.on('ready', () => {
   isReady = true;
-  console.log('✅ WhatsApp подключён');
+  console.log('✅ WhatsApp подключён и готов к отправке');
+});
+
+client.on('auth_failure', (msg) => {
+  console.error('❌ Ошибка авторизации:', msg);
 });
 
 client.initialize();
 
-// Главная страница
+// Корневая страница
 app.get('/', (req, res) => {
-  res.send('🚀 Сервер работает. Перейдите на /qr');
+  res.send('🚀 Сервер работает. Перейди на /qr для авторизации');
 });
 
-// Страница QR-кода
+// Страница QR
 app.get('/qr', (req, res) => {
   if (isReady) {
     res.send('✅ WhatsApp уже подключён');
   } else if (qrCode) {
     res.render('qr', { qrCode });
   } else {
-    res.send('⏳ QR ещё не сгенерирован, обновите страницу через 5 сек...');
+    res.send('⏳ QR ещё не сгенерирован, подожди и обнови страницу');
   }
 });
 
-// Новый API-эндпоинт для отправки сообщений
+// Обработка POST-запросов для отправки сообщений
 app.post('/send', async (req, res) => {
-  const { phone, text } = req.body;
+  const body = req.body?.body || req.body;
+  const raw = body.destination || "";
+  const text = body.message || "Пустое сообщение";
 
-  if (!phone || !text) {
-    return res.status(400).json({ error: 'Необходимо указать phone и text' });
+  // Форматирование номера
+  let digits = raw.replace(/\D/g, '');
+  if (digits.startsWith('8')) digits = '7' + digits.slice(1);
+  if (digits.length === 10) digits = '7' + digits;
+  if (digits.length !== 11 || !digits.startsWith('7')) {
+    console.log('❌ Неверный номер:', raw);
+    return res.status(400).json({ error: 'Неверный номер телефона' });
   }
 
+  if (!isReady) {
+    console.log('⛔ WhatsApp ещё не подключён');
+    return res.status(503).json({ error: 'WhatsApp ещё не подключён' });
+  }
+
+  const chatId = `${digits}@c.us`;
+
   try {
-    const chatId = phone.includes('@c.us') ? phone : `${phone}@c.us`;
-    await client.sendMessage(chatId, text);
-    console.log(`📤 Сообщение отправлено: ${phone} — ${text}`);
-    res.json({ success: true, message: 'Сообщение отправлено' });
+    const result = await client.sendMessage(chatId, text);
+    console.log(`✅ Сообщение отправлено на ${digits}: ${text}`);
+    res.json({ success: true });
   } catch (error) {
-    console.error('❌ Ошибка отправки:', error);
-    res.status(500).json({ error: 'Ошибка отправки сообщения' });
+    console.error('❌ Ошибка отправки:', error.message);
+    res.status(500).json({ error: 'Ошибка отправки сообщения', details: error.message });
   }
 });
 
 // Запуск сервера
 app.listen(port, () => {
-  console.log(`Сервер запущен: http://localhost:${port}`);
+  console.log(`🌐 Сервер запущен: http://localhost:${port}`);
 });
