@@ -1,101 +1,146 @@
+const fs = require('fs');
+const qrcode = require('qrcode');
 const express = require('express');
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode');
-const path = require('path');
 
 const app = express();
-const port = process.env.PORT || 3000;
-
-let qrCode = null;
-let isReady = false;
-
-// Настройки шаблонов и JSON
-app.set('view engine', 'ejs');
-app.set('views', path.join(__dirname, 'views'));
-app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Инициализация WhatsApp клиента
+const SESSION_DIR = './.wwebjs_auth';
+
 const client = new Client({
-  authStrategy: new LocalAuth(),
+  authStrategy: new LocalAuth({ dataPath: SESSION_DIR }),
   puppeteer: {
     headless: true,
-    args: ['--no-sandbox'],
-  },
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--single-process',
+      '--disable-gpu'
+    ]
+  }
 });
 
-client.on('qr', (qr) => {
-  qrcode.toDataURL(qr, (err, url) => {
-    qrCode = url;
-    console.log('📱 QR-код готов, перейди на /qr');
-  });
+let qrCodeData = '';
+let isReady = false;
+let messageLog = [];
+
+client.on('qr', async (qr) => {
+  qrCodeData = await qrcode.toDataURL(qr);
+  console.log('📱 QR-код обновлён. Перейди на /');
 });
 
 client.on('ready', () => {
+  console.log('✅ WhatsApp подключён');
   isReady = true;
-  console.log('✅ WhatsApp подключён и готов к отправке');
 });
 
-client.on('auth_failure', (msg) => {
-  console.error('❌ Ошибка авторизации:', msg);
+client.on('disconnected', (reason) => {
+  console.warn('❌ Отключение:', reason);
+  isReady = false;
+});
+
+client.on('message', async (msg) => {
+  const contact = await msg.getContact();
+  messageLog.unshift({
+    direction: 'IN',
+    from: contact.number || msg.from,
+    text: msg.body,
+    time: new Date().toLocaleString()
+  });
+  if (messageLog.length > 100) messageLog = messageLog.slice(0, 100);
+});
+
+app.get('/', (_, res) => {
+  const html = `
+  <html>
+  <head>
+    <title>WA-сервер</title>
+    <style>
+      body { font-family: sans-serif; padding: 20px; background: #f9f9f9; color: #333; }
+      h1 { color: #1e90ff; }
+      .qr { margin-bottom: 20px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+      th, td { border: 1px solid #ccc; padding: 8px; text-align: left; font-size: 14px; }
+      th { background: #eee; }
+      .in { color: green; }
+      .out { color: blue; }
+      .offline { color: red; }
+      .status { font-weight: bold; margin-bottom: 10px; }
+    </style>
+  </head>
+  <body>
+    <h1>📡 Arcanum WA-сервер</h1>
+    <div class="status">Статус: <span class="${isReady ? 'online' : 'offline'}">${isReady ? '🟢 Онлайн' : '🔴 Оффлайн'}</span></div>
+
+    ${qrCodeData ? `<div class="qr"><img src="${qrCodeData}" width="250" /></div>` : '<p>⏳ QR-код ещё не сгенерирован...</p>'}
+
+    <h2>📑 Последние сообщения</h2>
+    <table>
+      <thead><tr><th>Тип</th><th>От/Кому</th><th>Текст</th><th>Время</th></tr></thead>
+      <tbody>
+        ${messageLog.slice(0, 20).map(msg => `
+          <tr>
+            <td class="${msg.direction === 'IN' ? 'in' : 'out'}">${msg.direction}</td>
+            <td>${msg.from || msg.to}</td>
+            <td>${msg.text}</td>
+            <td>${msg.time}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  </body>
+  </html>
+  `;
+  res.send(html);
+});
+
+app.post('/send', async (req, res) => {
+  const { phone, text } = req.body;
+
+  if (!phone || !text) {
+    return res.status(400).json({ error: 'Неверные параметры' });
+  }
+
+  if (!isReady || !client.info || !client.info.wid) {
+    return res.status(503).json({ error: 'WhatsApp не подключён' });
+  }
+
+  try {
+    const chatId = `${phone}@c.us`;
+    console.log('📤 Отправка на:', chatId, '→', text);
+    await client.sendMessage(chatId, text);
+
+    messageLog.unshift({
+      direction: 'OUT',
+      to: phone,
+      text,
+      time: new Date().toLocaleString()
+    });
+    if (messageLog.length > 100) messageLog = messageLog.slice(0, 100);
+
+    res.json({ status: 'ok', message: 'Отправлено' });
+  } catch (err) {
+    console.error('❌ Ошибка отправки:', err.message);
+    res.status(500).json({ error: 'Ошибка отправки сообщения' });
+  }
+});
+
+// Завершение при выходе
+process.on('SIGINT', async () => {
+  console.log('🛑 Завершение работы...');
+  await client.destroy();
+  process.exit(0);
 });
 
 client.initialize();
 
-// Корневая страница
-app.get('/', (req, res) => {
-  res.send('🚀 Сервер работает. Перейди на /qr для авторизации');
-});
-
-// Страница QR
-app.get('/qr', (req, res) => {
-  if (isReady) {
-    res.send('✅ WhatsApp уже подключён');
-  } else if (qrCode) {
-    res.render('qr', { qrCode });
-  } else {
-    res.send('⏳ QR ещё не сгенерирован, подожди и обнови страницу');
-  }
-});
-
-// Обработка POST-запросов для отправки сообщений
-app.post('/send', async (req, res) => {
-  const body = req.body?.body || req.body;
-  const raw = body.destination || body.phone || "";
-  const text = body.message || body.text || "Сообщение по умолчанию";
-
-  let digits = raw.replace(/\D/g, '');
-
-  if (digits.length === 10) {
-    digits = '7' + digits;
-  } else if (digits.length === 11 && digits.startsWith('8')) {
-    digits = '7' + digits.slice(1);
-  }
-
-  // 🔐 Финальная проверка
-  const validPhone = digits.length === 11 && digits.startsWith('7');
-  if (!validPhone) {
-    console.log('❌ Неверный номер:', raw);
-    return res.status(400).json({ error: 'Неверный номер телефона', original: raw });
-  }
-
-  if (!isReady) {
-    return res.status(503).json({ error: 'WhatsApp ещё не подключён' });
-  }
-
-  const chatId = `${digits}@c.us`;
-
-  try {
-    const result = await client.sendMessage(chatId, text);
-    console.log(`✅ Отправлено ${digits}: ${text}`);
-    res.json({ success: true });
-  } catch (error) {
-    console.error('❌ Ошибка отправки:', error.message);
-    res.status(500).json({ error: 'Ошибка отправки сообщения', details: error.message });
-  }
-});
-
-// Запуск сервера
-app.listen(port, () => {
-  console.log(`🌐 Сервер запущен: http://localhost:${port}`);
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Сервер запущен на порту ${PORT}`);
 });
