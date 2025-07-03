@@ -51,14 +51,22 @@ client.on('disconnected', (reason) => {
 });
 
 client.on('message', async (msg) => {
-  const contact = await msg.getContact();
-  messageLog.unshift({
-    direction: 'IN',
-    from: contact.number || msg.from,
-    text: msg.body,
-    time: new Date().toLocaleString()
-  });
-  if (messageLog.length > 100) messageLog = messageLog.slice(0, 100);
+  try {
+    const contact = await msg.getContact();
+    const sender = contact.number || msg.from || 'неизвестно';
+
+    messageLog.unshift({
+      direction: 'IN',
+      from: sender,
+      text: msg.body || '(пустое сообщение)',
+      time: new Date().toLocaleString()
+    });
+
+    if (messageLog.length > 100) messageLog = messageLog.slice(0, 100);
+    console.log(`📥 Входящее сообщение от ${sender}: ${msg.body}`);
+  } catch (error) {
+    console.error('⚠️ Ошибка обработки входящего сообщения:', error.message);
+  }
 });
 
 app.get('/', (_, res) => {
