@@ -43,6 +43,11 @@ client.on('ready', () => {
 client.on('disconnected', (reason) => {
   console.warn('❌ Отключение:', reason);
   isReady = false;
+
+  setTimeout(() => {
+    console.log('🔁 Повторная инициализация...');
+    client.initialize();
+  }, 10000);
 });
 
 client.on('message', async (msg) => {
@@ -111,29 +116,29 @@ app.post('/send', async (req, res) => {
     return res.status(503).json({ error: 'WhatsApp не подключён' });
   }
 
- try {
-  const chatId = `${phone}@c.us`;
-  console.log('📤 Отправка на:', chatId, '→', text);
+  try {
+    const chatId = `${phone}@c.us`;
+    console.log('📤 Отправка на:', chatId, '→', text);
 
-  const chat = await client.getChatById(chatId); // проверка доступности чата
-  await chat.sendMessage(text);
+    const chat = await client.getChatById(chatId);
+    await chat.sendMessage(text);
 
-  messageLog.unshift({
-    direction: 'OUT',
-    to: phone,
-    text,
-    time: new Date().toLocaleString()
-  });
-  if (messageLog.length > 100) messageLog = messageLog.slice(0, 100);
+    messageLog.unshift({
+      direction: 'OUT',
+      to: phone,
+      text,
+      time: new Date().toLocaleString()
+    });
+    if (messageLog.length > 100) messageLog = messageLog.slice(0, 100);
 
-  res.json({ status: 'ok', message: 'Отправлено' });
-} catch (err) {
-  console.error('❌ Ошибка отправки:', err.message);
-  console.error('📛 Полный стек:', err.stack);
-  res.status(500).json({ error: 'Ошибка отправки сообщения', details: err.message });
-}
+    res.json({ status: 'ok', message: 'Отправлено' });
+  } catch (err) {
+    console.error('❌ Ошибка отправки:', err.message);
+    console.error('📛 Полный стек:', err.stack);
+    res.status(500).json({ error: 'Ошибка отправки сообщения', details: err.message });
+  }
+});
 
-// Завершение при выходе
 process.on('SIGINT', async () => {
   console.log('🛑 Завершение работы...');
   await client.destroy();
