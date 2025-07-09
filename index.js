@@ -2,6 +2,7 @@ const fs = require('fs');
 const qrcode = require('qrcode');
 const express = require('express');
 const { Client, LocalAuth } = require('whatsapp-web.js');
+const axios = require('axios');
 
 const app = express();
 app.use(express.json());
@@ -64,6 +65,17 @@ client.on('message', async (msg) => {
 
     if (messageLog.length > 100) messageLog = messageLog.slice(0, 100);
     console.log(`📥 Входящее сообщение от ${sender}: ${msg.body}`);
+
+    // 🔁 Отправка в n8n для смены статуса
+    try {
+      await axios.post('https://n8n.arcanum.kz/webhook/whatsapp-reply-hook', {
+        destination: sender,
+        message: msg.body
+      });
+    } catch (err) {
+      console.error('❗ Ошибка отправки в n8n:', err.message);
+    }
+
   } catch (error) {
     console.error('⚠️ Ошибка обработки входящего сообщения:', error.message);
   }
