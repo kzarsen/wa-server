@@ -31,6 +31,18 @@ let qrCodeData = '';
 let isReady = false;
 let messageLog = [];
 
+// Универсальная функция логирования
+function logMessage({ direction, text, from, to }) {
+  messageLog.unshift({
+    direction,
+    text,
+    from,
+    to,
+    time: new Date().toLocaleString()
+  });
+  if (messageLog.length > 100) messageLog = messageLog.slice(0, 100);
+}
+
 client.on('qr', async (qr) => {
   qrCodeData = await qrcode.toDataURL(qr);
   console.log('📱 QR-код обновлён. Перейди на /');
@@ -41,9 +53,20 @@ client.on('ready', () => {
   isReady = true;
 });
 
-client.on('disconnected', (reason) => {
+client.on('disconnected', async (reason) => {
   console.warn('❌ Отключение:', reason);
   isReady = false;
+
+  // Отправка уведомления в n8n
+  try {
+    await axios.post('https://primary-production-458a9.up.railway.app/webhook/wa-disconnected-alert', {
+      event: 'whatsapp_disconnected',
+      time: new Date().toISOString()
+    });
+    console.log('📤 Уведомление об отключении отправлено в n8n');
+  } catch (err) {
+    console.error('❗ Не удалось отправить уведомление в n8n:', err.message);
+  }
 
   setTimeout(() => {
     console.log('🔁 Повторная инициализация...');
@@ -56,14 +79,7 @@ client.on('message', async (msg) => {
     const contact = await msg.getContact();
     const sender = contact.number || msg.from || 'неизвестно';
 
-    messageLog.unshift({
-      direction: 'IN',
-      from: sender,
-      text: msg.body || '(пустое сообщение)',
-      time: new Date().toLocaleString()
-    });
-
-    if (messageLog.length > 100) messageLog = messageLog.slice(0, 100);
+    logMessage({ direction: 'IN', from: sender, text: msg.body || '(пустое сообщение)' });
     console.log(`📥 Входящее сообщение от ${sender}: ${msg.body}`);
 
     // 🔁 Отправка в n8n для смены статуса
@@ -106,15 +122,13 @@ app.get('/', (_, res) => {
     ${qrCodeData ? `<div class="qr"><img src="${qrCodeData}" width="250" /></div>` : '<p>⏳ QR-код ещё не сгенерирован...</p>'}
 
     <h2>📋 Что делать при отключении</h2>
-<p>Если Вам пришло сообщение, что сервер WhatsApp Web отключился:</p>
-<ol>
-  <li>Откройте рабочий WhatsApp на телефоне</li>
-  <li>Зайдите в <strong>Меню → Связанные устройства</strong></li>
-  <li>Нажмите <strong>Привязать устройство</strong></li>
-  <li>Отсканируйте QR-код на этой странице</li>
-</ol>
-<p>После сканирования обновите страницу до появления статуса или повторите всю процедуру сначала <strong>🟢 Онлайн</strong>.</p>
-
+    <ol>
+      <li>Откройте рабочий WhatsApp на телефоне</li>
+      <li>Зайдите в <strong>Меню → Связанные устройства</strong></li>
+      <li>Нажмите <strong>Привязать устройство</strong></li>
+      <li>Отсканируйте QR-код на этой странице</li>
+    </ol>
+    <p>После сканирования обновите страницу или дождитесь статуса <strong>🟢 Онлайн</strong>.</p>
 
     <h2>📑 Последние сообщения</h2>
     <table>
@@ -149,27 +163,33 @@ app.post('/send', async (req, res) => {
 
   try {
     const chatId = `${phone}@c.us`;
-    console.log('📤 Отправка на:', chatId, '→', text);
-
     const chat = await client.getChatById(chatId);
     await chat.sendMessage(text);
+    console.log('📤 Отправлено на', phone, ':', text);
 
-    messageLog.unshift({
-      direction: 'OUT',
-      to: phone,
-      text,
-      time: new Date().toLocaleString()
-    });
-    if (messageLog.length > 100) messageLog = messageLog.slice(0, 100);
-
+    logMessage({ direction: 'OUT', to: phone, text });
     res.json({ status: 'ok', message: 'Отправлено' });
   } catch (err) {
     console.error('❌ Ошибка отправки:', err.message);
-    console.error('📛 Полный стек:', err.stack);
     res.status(500).json({ error: 'Ошибка отправки сообщения', details: err.message });
   }
 });
 
+// POST /restart — принудительный перезапуск WA-клиента
+app.post('/restart', async (_, res) => {
+  try {
+    console.log('🔄 Перезапуск WA клиента по запросу...');
+    isReady = false;
+    await client.destroy();
+    client.initialize();
+    res.json({ status: 'ok', message: 'Клиент перезапускается...' });
+  } catch (err) {
+    console.error('❌ Ошибка при перезапуске:', err.message);
+    res.status(500).json({ error: 'Ошибка перезапуска', details: err.message });
+  }
+});
+
+// Завершение процесса
 process.on('SIGINT', async () => {
   console.log('🛑 Завершение работы...');
   await client.destroy();
