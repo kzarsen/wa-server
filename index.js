@@ -68,7 +68,7 @@ client.on('message', async (msg) => {
 
     // 🔁 Отправка в n8n для смены статуса
     try {
-      await axios.post('https://n8n.arcanum.kz/webhook/whatsapp-reply-hook', {
+      await axios.post('https://primary-production-458a9.up.railway.app/webhook/whatsapp-reply-hook', {
         destination: sender,
         message: msg.body
       });
