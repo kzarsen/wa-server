@@ -215,6 +215,9 @@ process.on('SIGINT', async () => {
 client.initialize();
 
 const PORT = process.env.PORT || 3000;
+app.get('/status', (_, res) => {
+  res.json({ status: isReady ? 'online' : 'offline' });
+});
 app.listen(PORT, () => {
   console.log(`🚀 Сервер запущен на порту ${PORT}`);
 });
