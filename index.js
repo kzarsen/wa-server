@@ -31,7 +31,7 @@ let qrCodeData = '';
 let isReady = false;
 let messageLog = [];
 
-// Универсальная функция логирования
+// Универсальное логирование сообщений
 function logMessage({ direction, text, from, to }) {
   messageLog.unshift({
     direction,
@@ -41,6 +41,25 @@ function logMessage({ direction, text, from, to }) {
     time: new Date().toLocaleString()
   });
   if (messageLog.length > 100) messageLog = messageLog.slice(0, 100);
+}
+
+// Универсальный парсер текста сообщений
+function extractText(msg) {
+  if (msg.body && typeof msg.body === 'string' && msg.body.trim().length > 0) {
+    return msg.body;
+  }
+
+  if (msg.hasMedia && msg.caption) {
+    return msg.caption;
+  }
+
+  if (msg.type === 'image') return '[Изображение]';
+  if (msg.type === 'video') return '[Видео]';
+  if (msg.type === 'sticker') return '[Стикер]';
+  if (msg.type === 'document') return msg.filename || '[Документ]';
+  if (msg.type === 'reaction') return `[Реакция: ${msg.body}]`;
+
+  return '[Сообщение без текста]';
 }
 
 client.on('qr', async (qr) => {
@@ -57,7 +76,6 @@ client.on('disconnected', async (reason) => {
   console.warn('❌ Отключение:', reason);
   isReady = false;
 
-  // Отправка уведомления в n8n
   try {
     await axios.post('https://primary-production-458a9.up.railway.app/webhook/wa-disconnected-alert', {
       event: 'whatsapp_disconnected',
@@ -78,15 +96,15 @@ client.on('message', async (msg) => {
   try {
     const contact = await msg.getContact();
     const sender = contact.number || msg.from || 'неизвестно';
+    const text = extractText(msg);
 
-    logMessage({ direction: 'IN', from: sender, text: msg.body || '(пустое сообщение)' });
-    console.log(`📥 Входящее сообщение от ${sender}: ${msg.body}`);
+    logMessage({ direction: 'IN', from: sender, text });
+    console.log(`📥 Входящее сообщение от ${sender}: ${text}`);
 
-    // 🔁 Отправка в n8n для смены статуса
     try {
       await axios.post('https://primary-production-458a9.up.railway.app/webhook/whatsapp-reply-hook', {
         destination: sender,
-        message: msg.body
+        message: text
       });
     } catch (err) {
       console.error('❗ Ошибка отправки в n8n:', err.message);
@@ -165,9 +183,9 @@ app.post('/send', async (req, res) => {
     const chatId = `${phone}@c.us`;
     const chat = await client.getChatById(chatId);
     await chat.sendMessage(text);
-    console.log('📤 Отправлено на', phone, ':', text);
 
     logMessage({ direction: 'OUT', to: phone, text });
+    console.log('📤 Отправлено на', phone, ':', text);
     res.json({ status: 'ok', message: 'Отправлено' });
   } catch (err) {
     console.error('❌ Ошибка отправки:', err.message);
@@ -175,7 +193,6 @@ app.post('/send', async (req, res) => {
   }
 });
 
-// POST /restart — принудительный перезапуск WA-клиента
 app.post('/restart', async (_, res) => {
   try {
     console.log('🔄 Перезапуск WA клиента по запросу...');
@@ -189,7 +206,6 @@ app.post('/restart', async (_, res) => {
   }
 });
 
-// Завершение процесса
 process.on('SIGINT', async () => {
   console.log('🛑 Завершение работы...');
   await client.destroy();
