@@ -229,9 +229,3 @@ app.get('/status', (_, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Сервер запущен на порту ${PORT}`);
 });
-"""
-
-# Save to file
-file_path = Path("/mnt/data/index-gpt-updated.js")
-file_path.write_text(updated_code.strip(), encoding="utf-8")
-file_path.name
