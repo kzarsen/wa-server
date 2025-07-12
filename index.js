@@ -1,3 +1,7 @@
+from pathlib import Path
+
+# Обновлённый index.js с добавлением вызова GPT webhook
+updated_code = """
 const fs = require('fs');
 const qrcode = require('qrcode');
 const express = require('express');
@@ -31,7 +35,6 @@ let qrCodeData = '';
 let isReady = false;
 let messageLog = [];
 
-// Универсальное логирование сообщений
 function logMessage({ direction, text, from, to }) {
   messageLog.unshift({
     direction,
@@ -43,7 +46,6 @@ function logMessage({ direction, text, from, to }) {
   if (messageLog.length > 100) messageLog = messageLog.slice(0, 100);
 }
 
-// Универсальный парсер текста сообщений
 function extractText(msg) {
   if (msg.body && typeof msg.body === 'string' && msg.body.trim().length > 0) {
     return msg.body;
@@ -110,6 +112,16 @@ client.on('message', async (msg) => {
       console.error('❗ Ошибка отправки в n8n:', err.message);
     }
 
+    try {
+      await axios.post('https://primary-production-458a9.up.railway.app/webhook/gpt-whatsapp-agent', {
+        destination: sender,
+        message: text
+      });
+      console.log('🤖 Отправлено в GPT-бота');
+    } catch (err) {
+      console.error('❌ Ошибка при вызове GPT-бота:', err.message);
+    }
+
   } catch (error) {
     console.error('⚠️ Ошибка обработки входящего сообщения:', error.message);
   }
@@ -154,10 +166,10 @@ app.get('/', (_, res) => {
       <tbody>
         ${messageLog.slice(0, 20).map(msg => `
           <tr>
-            <td class="${msg.direction === 'IN' ? 'in' : 'out'}">${msg.direction}</td>
-            <td>${msg.from || msg.to}</td>
-            <td>${msg.text}</td>
-            <td>${msg.time}</td>
+            <td class="\${msg.direction === 'IN' ? 'in' : 'out'}">\${msg.direction}</td>
+            <td>\${msg.from || msg.to}</td>
+            <td>\${msg.text}</td>
+            <td>\${msg.time}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -221,3 +233,9 @@ app.get('/status', (_, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Сервер запущен на порту ${PORT}`);
 });
+"""
+
+# Save to file
+file_path = Path("/mnt/data/index-gpt-updated.js")
+file_path.write_text(updated_code.strip(), encoding="utf-8")
+file_path.name
