@@ -1,5 +1,3 @@
-from pathlib import Path
-
 # Обновлённый index.js с добавлением вызова GPT webhook
 updated_code = """
 const fs = require('fs');
