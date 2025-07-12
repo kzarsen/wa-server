@@ -1,5 +1,3 @@
-# Обновлённый index.js с добавлением вызова GPT webhook
-updated_code = """
 const fs = require('fs');
 const qrcode = require('qrcode');
 const express = require('express');
